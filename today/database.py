@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 import json
 
-from .models import Task, TaskStatus, Priority
+from .models import Task, TaskStatus
 
 
 class Database:
@@ -26,16 +26,32 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 description TEXT NOT NULL,
                 status TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                tags TEXT,
                 date_created TIMESTAMP NOT NULL,
-                date_started TIMESTAMP,
-                date_completed TIMESTAMP,
-                date_due TIMESTAMP,
-                blocker_reason TEXT,
-                archived BOOLEAN DEFAULT 0
+                date_completed TIMESTAMP
             )
         ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS work_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL,
+                work_date DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES tasks (id),
+                UNIQUE(task_id, work_date)
+            )
+        ''')
+        
+        # Create index for fast queries
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_work_sessions_date 
+            ON work_sessions (work_date)
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_work_sessions_task 
+            ON work_sessions (task_id)
+        ''')
+        
         self.conn.commit()
 
     def _task_from_row(self, row) -> Task:
@@ -43,30 +59,20 @@ class Database:
             id=row['id'],
             description=row['description'],
             status=TaskStatus(row['status']),
-            priority=Priority(row['priority']),
-            tags=json.loads(row['tags']) if row['tags'] else [],
             date_created=datetime.fromisoformat(row['date_created']) if row['date_created'] else datetime.now(),
-            date_started=datetime.fromisoformat(row['date_started']) if row['date_started'] else None,
             date_completed=datetime.fromisoformat(row['date_completed']) if row['date_completed'] else None,
-            date_due=datetime.fromisoformat(row['date_due']) if row['date_due'] else None,
-            blocker_reason=row['blocker_reason'],
-            archived=bool(row['archived'])
         )
 
     def add_task(self, description: str) -> int:
         task = Task(id=0, description=description)
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO tasks (description, status, priority, tags, date_created, date_started, archived)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tasks (description, status, date_created)
+            VALUES (?, ?, ?)
         ''', (
             task.description,
             task.status.value,
-            task.priority.value,
-            json.dumps(task.tags),
-            task.date_created.isoformat(),
-            task.date_started.isoformat() if task.date_started else None,
-            task.archived
+            task.date_created.isoformat()
         ))
         self.conn.commit()
         return cursor.lastrowid
@@ -83,24 +89,12 @@ class Database:
             UPDATE tasks SET
                 description = ?,
                 status = ?,
-                priority = ?,
-                tags = ?,
-                date_started = ?,
-                date_completed = ?,
-                date_due = ?,
-                blocker_reason = ?,
-                archived = ?
+                date_completed = ?
             WHERE id = ?
         ''', (
             task.description,
             task.status.value,
-            task.priority.value,
-            json.dumps(task.tags),
-            task.date_started.isoformat() if task.date_started else None,
             task.date_completed.isoformat() if task.date_completed else None,
-            task.date_due.isoformat() if task.date_due else None,
-            task.blocker_reason,
-            task.archived,
             task.id
         ))
         self.conn.commit()
@@ -114,73 +108,79 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM tasks 
-            WHERE archived = 0 AND status != ?
+            WHERE status != ?
             ORDER BY date_created DESC
         ''', (TaskStatus.COMPLETED.value,))
         return [self._task_from_row(row) for row in cursor.fetchall()]
 
-    def get_tasks_by_status(self, status: TaskStatus) -> List[Task]:
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM tasks 
-            WHERE status = ? AND archived = 0
-            ORDER BY date_created DESC
-        ''', (status.value,))
-        return [self._task_from_row(row) for row in cursor.fetchall()]
-
-    def get_yesterday_completed(self) -> List[Task]:
-        yesterday = datetime.now() - timedelta(days=1)
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM tasks 
-            WHERE status = ? AND date_completed >= ?
-            ORDER BY date_completed DESC
-        ''', (TaskStatus.COMPLETED.value, yesterday.isoformat()))
-        return [self._task_from_row(row) for row in cursor.fetchall()]
     
     def get_yesterday_worked(self) -> List[Task]:
-        yesterday_start = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_end = yesterday_start + timedelta(days=1)
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM tasks 
-            WHERE (date_started >= ? AND date_started < ?) 
-               OR (date_created >= ? AND date_created < ?)
-            ORDER BY date_started DESC, date_created DESC
-        ''', (yesterday_start.isoformat(), yesterday_end.isoformat(),
-              yesterday_start.isoformat(), yesterday_end.isoformat()))
-        return [self._task_from_row(row) for row in cursor.fetchall()]
+        """Get tasks worked on during the last work session"""
+        last_work_date = self.get_last_work_date()
+        if not last_work_date:
+            return []
+        
+        # Check if last work date is today - if so, go back one more work day
+        today = datetime.now().strftime('%Y-%m-%d')
+        if last_work_date.strftime('%Y-%m-%d') == today:
+            # Find the previous work date before today
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT MAX(work_date) as prev_date FROM work_sessions
+                WHERE work_date < ?
+            ''', (today,))
+            row = cursor.fetchone()
+            if row and row['prev_date']:
+                last_work_date = datetime.strptime(row['prev_date'], '%Y-%m-%d')
+            else:
+                return []  # No previous work sessions
+        
+        return self.get_tasks_worked_on_date(last_work_date)
     
     def get_today_worked(self) -> List[Task]:
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM tasks 
-            WHERE status = ? 
-              AND ((date_started >= ?) OR (date_created >= ?))
-            ORDER BY date_started DESC, date_created DESC
-        ''', (TaskStatus.WORKING.value, today_start.isoformat(), today_start.isoformat()))
-        return [self._task_from_row(row) for row in cursor.fetchall()]
+        """Get tasks worked on today"""
+        today = datetime.now()
+        return self.get_tasks_worked_on_date(today)
 
-    def get_completed_in_days(self, days: int) -> List[Task]:
-        since = datetime.now() - timedelta(days=days)
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM tasks 
-            WHERE status = ? AND date_completed >= ?
-            ORDER BY date_completed DESC
-        ''', (TaskStatus.COMPLETED.value, since.isoformat()))
-        return [self._task_from_row(row) for row in cursor.fetchall()]
 
-    def archive_old_tasks(self, days: int) -> int:
-        cutoff = datetime.now() - timedelta(days=days)
+    def record_work_session(self, task_id: int, work_date: Optional[datetime] = None):
+        """Record that work was done on a task on a specific date"""
+        if work_date is None:
+            work_date = datetime.now()
+        
+        work_date_str = work_date.strftime('%Y-%m-%d')
         cursor = self.conn.cursor()
+        
+        # Use INSERT OR IGNORE to avoid duplicates
         cursor.execute('''
-            UPDATE tasks SET archived = 1
-            WHERE status = ? AND date_completed < ? AND archived = 0
-        ''', (TaskStatus.COMPLETED.value, cutoff.isoformat()))
+            INSERT OR IGNORE INTO work_sessions (task_id, work_date)
+            VALUES (?, ?)
+        ''', (task_id, work_date_str))
         self.conn.commit()
-        return cursor.rowcount
+
+    def get_last_work_date(self) -> Optional[datetime]:
+        """Get the most recent date when any work was done"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT MAX(work_date) as last_date FROM work_sessions
+        ''')
+        row = cursor.fetchone()
+        if row and row['last_date']:
+            return datetime.strptime(row['last_date'], '%Y-%m-%d')
+        return None
+
+    def get_tasks_worked_on_date(self, date: datetime) -> List[Task]:
+        """Get all tasks that were worked on for a specific date"""
+        date_str = date.strftime('%Y-%m-%d')
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT t.* FROM tasks t
+            JOIN work_sessions ws ON t.id = ws.task_id
+            WHERE ws.work_date = ?
+            ORDER BY ws.created_at DESC
+        ''', (date_str,))
+        return [self._task_from_row(row) for row in cursor.fetchall()]
+
 
     def close(self):
         self.conn.close()
