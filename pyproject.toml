@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "today-cli"
-version = "0.1.0"
+name = "today"
+version = "1.0.0"
 description = "A simple CLI task manager for daily standups"
 readme = "README.md"
 requires-python = ">=3.12"
