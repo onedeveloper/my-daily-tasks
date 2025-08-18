@@ -21,11 +21,11 @@ class Priority(Enum):
 class Task:
     id: int
     description: str
-    status: TaskStatus = TaskStatus.PENDING
+    status: TaskStatus = TaskStatus.WORKING
     priority: Priority = Priority.MEDIUM
     tags: List[str] = field(default_factory=list)
     date_created: datetime = field(default_factory=datetime.now)
-    date_started: Optional[datetime] = None
+    date_started: Optional[datetime] = field(default_factory=datetime.now)
     date_completed: Optional[datetime] = None
     date_due: Optional[datetime] = None
     blocker_reason: Optional[str] = None

@@ -22,8 +22,9 @@ today/
 ## Key Commands
 ```bash
 # Core operations
+today                      # Show tasks (default behavior)
 today task "description"    # Add task
-today list                  # Show tasks
+today list                  # Show tasks (explicit command)
 today done <id>            # Complete task
 today working <id>         # Mark as in-progress
 

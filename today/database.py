@@ -57,14 +57,15 @@ class Database:
         task = Task(id=0, description=description)
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO tasks (description, status, priority, tags, date_created, archived)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO tasks (description, status, priority, tags, date_created, date_started, archived)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
             task.description,
             task.status.value,
             task.priority.value,
             json.dumps(task.tags),
             task.date_created.isoformat(),
+            task.date_started.isoformat() if task.date_started else None,
             task.archived
         ))
         self.conn.commit()
@@ -135,6 +136,30 @@ class Database:
             WHERE status = ? AND date_completed >= ?
             ORDER BY date_completed DESC
         ''', (TaskStatus.COMPLETED.value, yesterday.isoformat()))
+        return [self._task_from_row(row) for row in cursor.fetchall()]
+    
+    def get_yesterday_worked(self) -> List[Task]:
+        yesterday_start = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_end = yesterday_start + timedelta(days=1)
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM tasks 
+            WHERE (date_started >= ? AND date_started < ?) 
+               OR (date_created >= ? AND date_created < ?)
+            ORDER BY date_started DESC, date_created DESC
+        ''', (yesterday_start.isoformat(), yesterday_end.isoformat(),
+              yesterday_start.isoformat(), yesterday_end.isoformat()))
+        return [self._task_from_row(row) for row in cursor.fetchall()]
+    
+    def get_today_worked(self) -> List[Task]:
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM tasks 
+            WHERE status = ? 
+              AND ((date_started >= ?) OR (date_created >= ?))
+            ORDER BY date_started DESC, date_created DESC
+        ''', (TaskStatus.WORKING.value, today_start.isoformat(), today_start.isoformat()))
         return [self._task_from_row(row) for row in cursor.fetchall()]
 
     def get_completed_in_days(self, days: int) -> List[Task]:

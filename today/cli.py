@@ -8,13 +8,27 @@ from .models import Priority, TaskStatus
 from . import display
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(version='0.1.0', prog_name='today')
+@click.option('--date', help='Simulate a specific date (YYYY-MM-DD)')
 @click.pass_context
-def cli(ctx):
+def cli(ctx, date):
     """A simple CLI task manager for daily standups"""
     ctx.ensure_object(dict)
-    ctx.obj['manager'] = TaskManager()
+    ctx.obj['manager'] = TaskManager(simulated_date=date)
+    ctx.obj['date'] = date
+    
+    # If no command is provided, show the task list
+    if ctx.invoked_subcommand is None:
+        # Call the list command logic directly
+        manager = ctx.obj['manager']
+        tasks = manager.get_active_tasks()
+        
+        # Sort by priority then date
+        priority_order = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+        tasks.sort(key=lambda t: (priority_order[t.priority], -t.date_created.timestamp()))
+        
+        click.echo(display.format_task_list(tasks))
 
 
 @cli.command()
@@ -192,7 +206,7 @@ def tag(ctx, task_id, tag_name):
 def standup(ctx):
     """Generate standup report"""
     manager = ctx.obj['manager']
-    yesterday = manager.get_yesterday_completed_tasks()
+    yesterday = manager.get_yesterday_worked_tasks()
     working = manager.get_today_working_tasks()
     priority = manager.get_today_pending_high_priority_tasks()
     blocked = manager.get_blocked_tasks()
@@ -255,6 +269,16 @@ def stats(ctx):
     manager = ctx.obj['manager']
     stats = manager.get_productivity_stats(30)
     click.echo(display.format_stats_report(stats))
+
+
+@cli.command()
+@click.argument('days', type=int, default=7)
+@click.pass_context
+def history(ctx, days):
+    """Show task history for the past N days"""
+    manager = ctx.obj['manager']
+    history = manager.get_history(days)
+    click.echo(display.format_history_report(history))
 
 
 def main():

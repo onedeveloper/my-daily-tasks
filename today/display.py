@@ -75,7 +75,7 @@ def format_task_list(tasks: List[Task]) -> str:
 
 
 def format_standup_report(
-    yesterday_completed: List[Task],
+    yesterday_worked: List[Task],
     today_working: List[Task],
     today_priority: List[Task],
     blocked: List[Task],
@@ -86,24 +86,47 @@ def format_standup_report(
     
     # Yesterday section
     report.append(f"\n{Fore.GREEN}▶ YESTERDAY{Style.RESET_ALL}")
-    if yesterday_completed:
-        for task in yesterday_completed:
-            report.append(f"  ✓ {task.description}")
+    if yesterday_worked:
+        for task in yesterday_worked:
+            if task.status == TaskStatus.COMPLETED:
+                report.append(f"  ✓ {task.description} (completed)")
+            else:
+                report.append(f"  • {task.description} (worked on)")
     else:
-        report.append(f"  {Fore.YELLOW}No tasks completed yesterday{Style.RESET_ALL}")
+        report.append(f"  {Fore.YELLOW}No tasks worked on yesterday{Style.RESET_ALL}")
     
     # Today section
     report.append(f"\n{Fore.BLUE}▶ TODAY{Style.RESET_ALL}")
-    today_tasks = today_working + today_priority
-    if today_tasks:
-        for task in today_working:
-            report.append(f"  ⚡ {task.description} (in progress)")
-        for task in today_priority:
-            report.append(f"  • {task.description} (high priority)")
-    else:
-        report.append(f"  {Fore.YELLOW}No tasks in progress{Style.RESET_ALL}")
+    # Combine working tasks with high priority pending tasks
+    all_today_tasks = []
+    task_ids_added = set()
     
-    # Rolling tasks
+    # Add all today's tasks (working and completed)
+    for task in today_working:
+        if task.id not in task_ids_added:
+            all_today_tasks.append(task)
+            task_ids_added.add(task.id)
+    
+    # Add high priority pending tasks if not already included
+    for task in today_priority:
+        if task.id not in task_ids_added:
+            all_today_tasks.append(task)
+            task_ids_added.add(task.id)
+    
+    if all_today_tasks:
+        for task in all_today_tasks:
+            if task.status == TaskStatus.COMPLETED:
+                report.append(f"  ✓ {task.description} (completed)")
+            elif task.status == TaskStatus.WORKING:
+                report.append(f"  ⚡ {task.description} (in progress)")
+            elif task.priority == Priority.HIGH:
+                report.append(f"  • {task.description} (high priority)")
+            else:
+                report.append(f"  • {task.description}")
+    else:
+        report.append(f"  {Fore.YELLOW}No tasks for today{Style.RESET_ALL}")
+    
+    # Rolling tasks (only show if there are any)
     if rolling:
         report.append(f"\n{Fore.YELLOW}▶ ROLLING FORWARD{Style.RESET_ALL}")
         for task in rolling[:5]:  # Show max 5
@@ -182,6 +205,41 @@ def format_week_report(tasks: List[Task]) -> str:
                     report.append(f"  ... and {len(by_priority[priority]) - 5} more")
                 report.append("")
     
+    return "\n".join(report)
+
+
+def format_history_report(history: dict) -> str:
+    """Format task history report"""
+    if not history:
+        return f"{Fore.YELLOW}No task history found{Style.RESET_ALL}"
+    
+    report = [f"\n{Fore.CYAN}═══ TASK HISTORY ═══{Style.RESET_ALL}\n"]
+    
+    # Convert date strings to day names
+    from datetime import datetime
+    
+    for date_str in sorted(history.keys(), reverse=True):
+        tasks = history[date_str]
+        if tasks:
+            # Parse date and get day name
+            date_obj = datetime.fromisoformat(date_str)
+            day_name = date_obj.strftime("%A, %B %d")
+            
+            report.append(f"\n{Fore.BLUE}▶ {day_name}{Style.RESET_ALL}")
+            
+            for task in tasks:
+                status_icon = _get_status_icon(task.status)
+                priority_color = _get_priority_color(task.priority)
+                
+                # Show task with status
+                if task.status == TaskStatus.COMPLETED:
+                    report.append(f"  {status_icon} {task.description}")
+                elif task.status == TaskStatus.BLOCKED:
+                    report.append(f"  {status_icon} {task.description} [{task.blocker_reason}]")
+                else:
+                    report.append(f"  {status_icon} {task.description}")
+    
+    report.append("")
     return "\n".join(report)
 
 

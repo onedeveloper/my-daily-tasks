@@ -64,10 +64,13 @@ today --version
 ### Basic Commands
 
 ```bash
+# List all tasks (default behavior when no command provided)
+today
+
 # Add a new task
 today task "Review pull request #123"
 
-# List all tasks
+# List all tasks (explicit command)
 today list
 
 # Mark task as currently working
