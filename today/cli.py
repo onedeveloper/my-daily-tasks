@@ -29,7 +29,7 @@ def handle_task_or_list(ctx, args):
         tasks = manager.get_active_tasks()
         
         # Sort by creation date (newest first)
-        tasks.sort(key=lambda t: -t.date_created.timestamp())
+        tasks.sort(key=lambda t: t.date_created, reverse=True)
         
         click.echo(display.format_task_list(tasks))
 

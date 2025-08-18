@@ -11,7 +11,10 @@ class TaskManager:
         self.simulated_date = simulated_date
     
     def add_task(self, description: str) -> int:
-        return self.db.add_task(description)
+        task_id = self.db.add_task(description)
+        # Record work session for today when creating a task
+        self.db.record_work_session(task_id)
+        return task_id
     
     def get_task(self, task_id: int) -> Optional[Task]:
         return self.db.get_task(task_id)

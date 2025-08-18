@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 
 from .models import Task, TaskStatus
@@ -26,8 +26,8 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 description TEXT NOT NULL,
                 status TEXT NOT NULL,
-                date_created TIMESTAMP NOT NULL,
-                date_completed TIMESTAMP
+                date_created DATE NOT NULL,
+                date_completed DATE
             )
         ''')
         
@@ -36,7 +36,6 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id INTEGER NOT NULL,
                 work_date DATE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (task_id) REFERENCES tasks (id),
                 UNIQUE(task_id, work_date)
             )
@@ -59,8 +58,8 @@ class Database:
             id=row['id'],
             description=row['description'],
             status=TaskStatus(row['status']),
-            date_created=datetime.fromisoformat(row['date_created']) if row['date_created'] else datetime.now(),
-            date_completed=datetime.fromisoformat(row['date_completed']) if row['date_completed'] else None,
+            date_created=datetime.strptime(row['date_created'], '%Y-%m-%d').date() if row['date_created'] else date.today(),
+            date_completed=datetime.strptime(row['date_completed'], '%Y-%m-%d').date() if row['date_completed'] else None,
         )
 
     def add_task(self, description: str) -> int:
@@ -72,7 +71,7 @@ class Database:
         ''', (
             task.description,
             task.status.value,
-            task.date_created.isoformat()
+            task.date_created.strftime('%Y-%m-%d')
         ))
         self.conn.commit()
         return cursor.lastrowid
@@ -94,7 +93,7 @@ class Database:
         ''', (
             task.description,
             task.status.value,
-            task.date_completed.isoformat() if task.date_completed else None,
+            task.date_completed.strftime('%Y-%m-%d') if task.date_completed else None,
             task.id
         ))
         self.conn.commit()
@@ -138,9 +137,24 @@ class Database:
         return self.get_tasks_worked_on_date(last_work_date)
     
     def get_today_worked(self) -> List[Task]:
-        """Get tasks worked on today"""
+        """Get tasks for today: worked on today + all pending tasks (auto-rollover)"""
         today = datetime.now()
-        return self.get_tasks_worked_on_date(today)
+        today_str = today.strftime('%Y-%m-%d')
+        
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT DISTINCT t.* FROM tasks t
+            LEFT JOIN work_sessions ws ON t.id = ws.task_id
+            WHERE 
+                -- Tasks worked on today
+                (ws.work_date = ?)
+                OR 
+                -- All pending tasks (auto-rollover until completed)
+                (t.status = 'pending')
+            ORDER BY t.date_created DESC
+        ''', (today_str,))
+        
+        return [self._task_from_row(row) for row in cursor.fetchall()]
 
 
     def record_work_session(self, task_id: int, work_date: Optional[datetime] = None):
@@ -177,7 +191,7 @@ class Database:
             SELECT t.* FROM tasks t
             JOIN work_sessions ws ON t.id = ws.task_id
             WHERE ws.work_date = ?
-            ORDER BY ws.created_at DESC
+            ORDER BY t.date_created DESC
         ''', (date_str,))
         return [self._task_from_row(row) for row in cursor.fetchall()]
 

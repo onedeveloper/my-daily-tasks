@@ -37,7 +37,7 @@ def format_task_list(tasks: List[Task]) -> str:
     
     for task in tasks:
         status_icon = _get_status_icon(task.status)
-        created = task.date_created.strftime("%Y-%m-%d %H:%M")
+        created = task.date_created.strftime("%Y-%m-%d")
         rows.append([task.id, status_icon, task.description, created])
     
     return tabulate(rows, headers=headers, tablefmt="simple")
@@ -52,9 +52,9 @@ def format_standup_report(yesterday_worked: List[Task], today_working: List[Task
     if yesterday_worked:
         for task in yesterday_worked:
             if task.status == TaskStatus.COMPLETED:
-                report.append(f"  ✓ {task.description} (completed)")
+                report.append(f"  ✓ {task.description}")
             else:
-                report.append(f"  • {task.description} (worked on)")
+                report.append(f"  ⚡ {task.description}")
     else:
         report.append(f"  {Fore.YELLOW}No tasks worked on yesterday{Style.RESET_ALL}")
     
@@ -63,9 +63,9 @@ def format_standup_report(yesterday_worked: List[Task], today_working: List[Task
     if today_working:
         for task in today_working:
             if task.status == TaskStatus.COMPLETED:
-                report.append(f"  ✓ {task.description} (completed)")
+                report.append(f"  ✓ {task.description}")
             else:
-                report.append(f"  ⚡ {task.description} (in progress)")
+                report.append(f"  ⚡ {task.description}")
     else:
         report.append(f"  {Fore.YELLOW}No tasks for today{Style.RESET_ALL}")
     
